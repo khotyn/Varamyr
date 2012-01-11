@@ -1,14 +1,14 @@
 package com.khotyn.varamyr;
 
-import org.w3c.dom.*;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.transform.*;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
+import javax.xml.transform.TransformerException;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -23,7 +23,8 @@ import java.util.zip.ZipOutputStream;
  * Time: PM10:19
  */
 public class Varamyr {
-    public static final String font = "\n@page {\n" +
+    public static final byte[] font = ("\n<style type='text/css'>\n" +
+            "@page {\n" +
             "    margin-bottom: 5pt;\n" +
             "    margin-top: 5pt\n" +
             "    }\n" +
@@ -50,15 +51,33 @@ public class Varamyr {
             "    font-weight: bold;\n" +
             "    font-style: italic;\n" +
             "    src: url(res:///system/fonts/DroidSansFallback.ttf)\n" +
-            "    }\n";
+            "    }\n</style>").getBytes();
 
-    public static void main(String args[]) throws IOException, ParserConfigurationException, SAXException, TransformerException {
-        new Varamyr().parse();
+    public static void main(String args[]) {
+        if (args.length == 0) {
+            System.out.println("Please input the epub file path you want to convert!");
+            return;
+        }
+
+        try {
+            new Varamyr().parse(args[0]);
+        } catch (IOException e) {
+            System.out.println("Malformed epub file!!");
+        } catch (ParserConfigurationException e) {
+            System.out.println("Malformed epub file!!");
+        } catch (SAXException e) {
+            System.out.println("Malformed epub file!!");
+        }
     }
 
-    public void parse() throws IOException, ParserConfigurationException, SAXException, TransformerException {
-        ZipFile book = new ZipFile("/Users/apple/Downloads/1fe051f3b309c4405965903fd9ca053d.epub");
-        ZipOutputStream out = new ZipOutputStream(new FileOutputStream("/Users/apple/Downloads/test.epub"));
+    public void parse(String filePath) throws IOException, ParserConfigurationException, SAXException {
+        if (!filePath.endsWith(".epub")) {
+            System.out.println("Please provide an epub file");
+            return;
+        }
+
+        ZipFile book = new ZipFile(filePath);
+        ZipOutputStream out = new ZipOutputStream(new FileOutputStream(filePath.replace(".epub", "-varamyr.epub")));
         Enumeration entries = book.entries();
         List<String> htmls = new ArrayList<String>();
         DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
@@ -68,12 +87,10 @@ public class Varamyr {
         while (entries.hasMoreElements()) {
             ZipEntry zipEntry = (ZipEntry) entries.nextElement();
 
-            // Get the OPF file
             if (zipEntry.getName().endsWith(".opf")) {
                 Document document = db.parse(book.getInputStream(zipEntry));
                 Element element = document.getDocumentElement();
 
-                // Change the book title
                 NodeList nodeList = element.getElementsByTagName("item");
 
                 if (nodeList != null && nodeList.getLength() > 0) {
@@ -95,38 +112,23 @@ public class Varamyr {
             String path = zipEntry.getName().substring(zipEntry.getName().lastIndexOf('/') + 1);
 
             if (htmls.contains(path)) {
-                try {
-                    Document document = db.parse(book.getInputStream(zipEntry));
+                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(book.getInputStream(zipEntry)));
+                String line = null;
+                out.putNextEntry(new ZipEntry(zipEntry.getName()));
 
-                    Element element = document.getDocumentElement();
-
-                    NodeList nodeList = element.getElementsByTagName("head");
-
-                    if (nodeList != null && nodeList.getLength() == 1) {
-                        Element head = (Element) nodeList.item(0);
-
-                        Node css = document.createElement("style");
-                        NamedNodeMap attributes = css.getAttributes();
-                        Attr type = document.createAttribute("type");
-                        type.setValue("text/css");
-                        attributes.setNamedItem(type);
-                        css.setTextContent(font);
-                        head.appendChild(css);
+                while ((line = bufferedReader.readLine()) != null) {
+                    if (line.contains("<head>")) {
+                        int position = line.indexOf("<head>") + "<head>".length();
+                        out.write(line.substring(0, position).getBytes());
+                        out.write(font);
+                        out.write(line.substring(position).getBytes());
+                    } else {
+                        out.write(line.getBytes());
                     }
-
-                    Transformer transformer = TransformerFactory.newInstance().newTransformer();
-                    transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-
-                    StreamResult result = new StreamResult(new StringWriter());
-                    DOMSource source = new DOMSource(document);
-                    transformer.transform(source, result);
-
-                    out.putNextEntry(new ZipEntry(zipEntry.getName()));
-                    out.write(result.toString().getBytes());
-                    out.closeEntry();
-                } catch (SAXException ex) {
-                    System.out.println(zipEntry.getName());
                 }
+
+                out.closeEntry();
+                bufferedReader.close();
             } else {
                 InputStream in = book.getInputStream(zipEntry);
                 out.putNextEntry(new ZipEntry(zipEntry.getName()));
@@ -140,5 +142,7 @@ public class Varamyr {
                 in.close();
             }
         }
+
+        out.close();
     }
 }
